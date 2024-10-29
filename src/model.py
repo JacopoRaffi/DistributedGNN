@@ -38,17 +38,17 @@ class Grapher(nn.Module):
             nn.Linear(in_size, 256),
             nn.BatchNorm1d(256),
         )
-        self.graph_conv = GraphConv(256, 256 * 2)
+        self.graph_conv = GraphConv(256, 256)
 
         self.fc2 = nn.Sequential(
-            nn.Linear(256 * 2, in_size),
+            nn.Linear(256, in_size),
             nn.BatchNorm1d(in_size),
         )
 
     def forward(self, x, edge_index):
         _tmp = x
         x = self.fc1(x)
-        x = self.graph_conv(x, edge_index)
+        x = F.gelu(self.graph_conv(x, edge_index))
         x = self.fc2(x)
         x += _tmp
 

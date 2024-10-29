@@ -103,7 +103,7 @@ if __name__ == '__main__':
 
     device = 'cpu'
 
-    gnn = ViGNN(12, 3, 3, 1024, 10).to(device)
+    gnn = ViGNN(8, 3, 3, 1024, 10).to(device)
 
     optimizer = torch.optim.Adam(gnn.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
@@ -116,7 +116,7 @@ if __name__ == '__main__':
     train_dataset = CustomDataset(image_to_graph(train_dataset), length=args.l)
     test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l)
 
-    train_loader = DataLoader(train_dataset, batch_size=20, shuffle=True)
-    val_loader = DataLoader(test_dataset, batch_size=20, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=1000, shuffle=True)
+    val_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
 
     train(gnn, optimizer, criterion, train_loader, val_loader, 5, device, args.filename)

@@ -1,0 +1,10 @@
+torch==2.4.1 --index-url https://download.pytorch.org/whl/cpu
+torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu
+torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cpu
+torch-geometric==2.6.1
+scikit-image==0.24.0
+pandas==2.2.3
+torch_scatter --find-links https://data.pyg.org/whl/torch-2.4.0+cpu.html
+torch_sparse --find-links https://data.pyg.org/whl/torch-2.4.0+cpu.html
+torch_cluster --find-links https://data.pyg.org/whl/torch-2.4.0+cpu.html
+torch_spline_conv --find-links https://data.pyg.org/whl/torch-2.4.0+cpu.html

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import os
 from torch_geometric.nn.sequential import Sequential as Seq
 import torch.nn.functional as F
 from torch_geometric.utils import subgraph
@@ -102,14 +103,18 @@ class PipeViGNN(nn.Module):
         self.fc1 = nn.Linear(embedding_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, n_classes)
         
-    def forward(self, x, idx=None):
-        sub_edge_index, _ = subgraph(idx.squeeze(1), self.edges, relabel_nodes=True)
+    def forward(self, x, batch=None):
+        features = x[:, :-1]
+        indices = x[..., -1]
+        sub_edge_index, _ = subgraph(indices.long(), self.edges, relabel_nodes=True)
         for vig in self.blocks.values():
-            x = vig.forward(x, sub_edge_index)
+            features = vig.forward(features, sub_edge_index)
+
+        features = torch.cat((features, indices.view(-1, 1)), dim=1)  
 
         if self.fc1:
-            x = global_add_pool(x, idx)
-            x = F.gelu(self.fc1(x))
-            x = self.fc2(x)
+            features = global_add_pool(features[:, :-1], batch)
+            features = F.gelu(self.fc1(features))
+            features = self.fc2(features)
 
-        return x
+        return features

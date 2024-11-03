@@ -1,6 +1,3 @@
-#TODO: leggiti il paper su come fare GPipe con PyG, per i primi stage evita di passare anche il parametro batch
-#TODO: controllare la divisione in microbatch del parametro batch nell'ultimo stage
-
 from torchvision.datasets import CIFAR10
 import torchvision.transforms as T
 import torch
@@ -30,25 +27,38 @@ def init_distributed():
    num_stages = world_size
 
 
-def manual_split(model, data):
+def manual_split(data, microbatch_size=10, n_classes=10): #TODO: refactor code to make more elegant
+    model = PipeViGNN(8, 3, 3, 1024, 10, data.edge_index).to(device)
+    indices = torch.arange(data.x.size(0) , dtype=torch.int32).view(-1, 1)  
+
+    features_chunk = torch.chunk(data.x, microbatch_size, dim=0)[0]
+    idx_chunk = torch.chunk(indices, microbatch_size, dim=0)[0]
+
     if stage_index == 0:
         for i in range(4, 8):
             del model.blocks[str(i)]
             model.fc1 = None
+            model.fc2 = None
+            input_args = (features_chunk, idx_chunk)
+            output_args = (features_chunk, )
+    else:
+        out = torch.rand(features_chunk.size(0), n_classes, dtype=torch.float32)
+        out_chunk = torch.chunk(out, microbatch_size, dim=0)[0]
+        for i in range(0, 4):
+            del model.blocks[str(i)]
+            input_args = (features_chunk, idx_chunk)
+            output_args = (out_chunk, )
 
-        stage = PipelineStage(
+    stage = PipelineStage(
             submodule=model,
             stage_index=stage_index,
             num_stages=num_stages,
             device='cpu',
-            input_args=(data.x, data.edge_index),
-            output_args=(data.x, data.edge_index),
+            input_args=input_args,
+            output_args=output_args,
         )
-
-        return stage
-
-    else:
-        return None
+    
+    return stage
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -60,9 +70,6 @@ if __name__ == '__main__':
 
     device = 'cpu'
 
-    gnn = ViGNN(8, 3, 3, 1024, 10).to(device)
-
-    optimizer = torch.optim.Adam(gnn.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
     transform = T.ToTensor()
@@ -71,10 +78,13 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=20, shuffle=True)
 
     data = next(iter(train_loader))
-    stage = manual_split(gnn, data)
+    stage = manual_split(data)
 
-    print(stage)
+    schedule = ScheduleGPipe(stage, n_microbatches=10, loss_fn=criterion)
 
     if stage_index == 0:
+        indices = torch.arange(data.x.size(0), dtype=torch.int32).view(-1, 1)  # Reshape to a column vector
         schedule = ScheduleGPipe(stage, n_microbatches=10, loss_fn=criterion)
-        schedule.step(data.x, data.edge_index, data.batch)
+        schedule.step(data.x, indices)
+    else:
+        out = schedule.step(data.x, data.batch)

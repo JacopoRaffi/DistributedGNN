@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn.sequential import Sequential as Seq
 import torch.nn.functional as F
+from torch_geometric.utils import subgraph
 from torch_geometric.nn import GraphConv, global_add_pool
 
 
@@ -83,9 +84,31 @@ class ViGNN(nn.Module):
         for vig in self.blocks.values():
             x = vig.forward(x, edge_index)
 
-        if batch:
-            x = global_add_pool(x, batch)
+        x = global_add_pool(x, batch)
+        x = F.gelu(self.fc1(x))
+        x = self.fc2(x)
 
+        return x
+    
+class PipeViGNN(nn.Module):
+    def __init__(self, n_blocks, channels, embedding_size, hidden_size, n_classes, edges):
+        super().__init__()
+
+        self.edges = edges
+        self.blocks = torch.nn.ModuleDict()
+        for layer_id in range(n_blocks):
+            self.blocks[str(layer_id)] = ViGBlock(channels)
+
+        self.fc1 = nn.Linear(embedding_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, n_classes)
+        
+    def forward(self, x, idx=None):
+        sub_edge_index, _ = subgraph(idx.squeeze(1), self.edges, relabel_nodes=True)
+        for vig in self.blocks.values():
+            x = vig.forward(x, sub_edge_index)
+
+        if self.fc1:
+            x = global_add_pool(x, idx)
             x = F.gelu(self.fc1(x))
             x = self.fc2(x)
 

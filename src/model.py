@@ -4,6 +4,7 @@ from torch_geometric.nn.sequential import Sequential as Seq
 import torch.nn.functional as F
 from torch_geometric.nn import GraphConv, global_add_pool
 
+
 class FFN(nn.Module):
     def __init__(self, in_size, hidden_size=None):
         super(FFN, self).__init__()
@@ -71,18 +72,21 @@ class ViGNN(nn.Module):
     def __init__(self, n_blocks, channels, embedding_size, hidden_size, n_classes=10):
         super().__init__()
 
-        self.backbone =  nn.ModuleList([ViGBlock(channels) for _ in range(n_blocks)])
+        self.blocks = torch.nn.ModuleDict()
+        for layer_id in range(n_blocks):
+            self.blocks[str(layer_id)] = ViGBlock(channels)
 
         self.fc1 = nn.Linear(embedding_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, n_classes)
         
-    def forward(self, x, edge_index, batch):
-        for vig in self.backbone:
+    def forward(self, x, edge_index, batch=None):
+        for vig in self.blocks.values():
             x = vig.forward(x, edge_index)
 
-        x = global_add_pool(x, batch)
+        if batch:
+            x = global_add_pool(x, batch)
 
-        x = F.gelu(self.fc1(x))
-        x = self.fc2(x)
+            x = F.gelu(self.fc1(x))
+            x = self.fc2(x)
 
         return x

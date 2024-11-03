@@ -14,6 +14,8 @@ from model import *
 from data import CustomDataset, image_to_graph
 
 #TODO: refactor code to make more elegant
+#   change microbatch_size in n_microbatch
+#   same for minibatch_size
 
 global rank, device, pp_group, stage_index, num_stages
 def init_distributed():
@@ -29,9 +31,8 @@ def init_distributed():
    num_stages = world_size
 
 
-def manual_split(data, microbatch_size=10, n_classes=10):
-    model = PipeViGNN(8, 3, 3, 1024, 10, data.edge_index).to(device)
-
+def manual_split(data, microbatch_size=10, minibatch_size=20, n_classes=10):
+    model = PipeViGNN(8, 3, 3, 1024, n_classes, data.edge_index, 1024, minibatch_size//microbatch_size).to(device)
     indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
     data_x_with_index = torch.cat((data.x, indices), dim=1)  
     features_chunk = torch.chunk(data_x_with_index, microbatch_size, dim=0)[0]
@@ -43,9 +44,9 @@ def manual_split(data, microbatch_size=10, n_classes=10):
             model.fc2 = None
             input_args = (features_chunk,)
             output_args = (features_chunk, )
+
     else:
-        out = torch.rand(1, n_classes, dtype=torch.float32)
-        out_chunk = torch.chunk(out, microbatch_size, dim=0)[0]
+        out_chunk = torch.rand(minibatch_size//microbatch_size, n_classes, dtype=torch.float32)
         for i in range(0, 4):
             del model.blocks[str(i)]
             input_args = (features_chunk, )
@@ -80,17 +81,25 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=20, shuffle=True)
 
     data = next(iter(train_loader))
-    stage = manual_split(data, microbatch_size=4)
+    stage = manual_split(data, microbatch_size=4, minibatch_size=20, n_classes=10)
 
     schedule = ScheduleGPipe(stage, n_microbatches=4, loss_fn=criterion)
     indices = torch.arange(data.x.size(0), dtype=torch.float32).view(-1, 1)  # Reshape to a column vector
 
     if stage_index == 0:
+        initial_params = {name: param.clone() for name, param in stage.submod.named_parameters()}
+        optimizer = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
         indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
+        optimizer.zero_grad()
         data_x_with_index = torch.cat((data.x, indices), dim=1)  
-
         schedule.step(data_x_with_index)
+        optimizer.step()
+
     else:
+        initial_params = {name: param.clone() for name, param in stage.submod.named_parameters()}
+        optimizer = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
+        optimizer.zero_grad()
         out = schedule.step(target=data.y)
+        optimizer.step()
 
     dist.destroy_process_group()

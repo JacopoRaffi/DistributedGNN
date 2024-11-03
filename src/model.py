@@ -92,10 +92,12 @@ class ViGNN(nn.Module):
         return x
     
 class PipeViGNN(nn.Module):
-    def __init__(self, n_blocks, channels, embedding_size, hidden_size, n_classes, edges):
+    def __init__(self, n_blocks, channels, embedding_size, hidden_size, n_classes, edges, graph_nodes, microbatch_size):
         super().__init__()
 
+        self.batch = torch.tensor([i for i in range(microbatch_size) for _ in range(graph_nodes)])
         self.edges = edges
+        
         self.blocks = torch.nn.ModuleDict()
         for layer_id in range(n_blocks):
             self.blocks[str(layer_id)] = ViGBlock(channels)
@@ -103,7 +105,7 @@ class PipeViGNN(nn.Module):
         self.fc1 = nn.Linear(embedding_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, n_classes)
         
-    def forward(self, x, batch=None):
+    def forward(self, x):
         features = x[:, :-1]
         indices = x[..., -1]
         sub_edge_index, _ = subgraph(indices.long(), self.edges, relabel_nodes=True)
@@ -113,7 +115,7 @@ class PipeViGNN(nn.Module):
         features = torch.cat((features, indices.view(-1, 1)), dim=1)  
 
         if self.fc1:
-            features = global_add_pool(features[:, :-1], batch)
+            features = global_add_pool(features[:, :-1], batch=self.batch)
             features = F.gelu(self.fc1(features))
             features = self.fc2(features)
 

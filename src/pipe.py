@@ -157,15 +157,15 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--filename', type=str, help='Name of the log file', default=f'tmp.csv')
-    parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=60)
+    parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=0)
     args = parser.parse_args()
 
     init_distributed()
 
     device = 'cpu'
-    batch_size = 20
-    n_microbatch = 4
+    batch_size = 1000
+    n_microbatch = 5
+    filename = f'../log/pipe_{stage_index}_micro{n_microbatch}.csv'
 
     transform = T.ToTensor()
     train_dataset = CIFAR10(root='../data', train=True, download=False, transform=transform)
@@ -182,20 +182,7 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
-    train(stage, optim, train_loader, train_loader, 2, device, args.filename)
-
-    '''if stage_index == 0:
-        optimizer = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
-        indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
-        optimizer.zero_grad()
-        data_x_with_index = torch.cat((data.x, indices), dim=1)  
-        schedule.step(data_x_with_index)
-        optimizer.step()
-    else:
-        optimizer = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
-        optimizer.zero_grad()
-        out = schedule.step(target=data.y)
-        optimizer.step()'''
+    train(stage, criterion, optim, train_loader, test_loader, 2, device, filename)
 
     print(f'RANK_{stage_index}_DONE')
     dist.destroy_process_group()

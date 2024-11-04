@@ -20,7 +20,7 @@ from data import CustomDataset, image_to_graph
 global rank, device, pp_group, stage_index, num_stages
 def init_distributed():
    global rank, device, pp_group, stage_index, num_stages
-   rank = int(os.environ["LOCAL_RANK"])
+   rank = int(os.environ["RANK"])
    world_size = int(os.environ["WORLD_SIZE"])
    device = torch.device('cpu')
    dist.init_process_group()
@@ -31,11 +31,11 @@ def init_distributed():
    num_stages = world_size
 
 
-def manual_split(data, microbatch_size=10, minibatch_size=20, n_classes=10):
-    model = PipeViGNN(8, 3, 3, 1024, n_classes, data.edge_index, 1024, minibatch_size//microbatch_size).to(device)
+def manual_split(data, n_microbatches=10, minibatch_size=20, n_classes=10):
+    model = PipeViGNN(8, 3, 3, 1024, n_classes, data.edge_index, 1024, minibatch_size//n_microbatches).to(device)
     indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
     data_x_with_index = torch.cat((data.x, indices), dim=1)  
-    features_chunk = torch.chunk(data_x_with_index, microbatch_size, dim=0)[0]
+    features_chunk = torch.chunk(data_x_with_index, n_microbatches, dim=0)[0]
 
     if stage_index == 0:
         for i in range(4, 8):
@@ -46,7 +46,7 @@ def manual_split(data, microbatch_size=10, minibatch_size=20, n_classes=10):
             output_args = (features_chunk, )
 
     else:
-        out_chunk = torch.rand(minibatch_size//microbatch_size, n_classes, dtype=torch.float32)
+        out_chunk = torch.rand(minibatch_size//n_microbatches, n_classes, dtype=torch.float32)
         for i in range(0, 4):
             del model.blocks[str(i)]
             input_args = (features_chunk, )
@@ -66,7 +66,7 @@ def manual_split(data, microbatch_size=10, minibatch_size=20, n_classes=10):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--filename', type=str, help='Name of the log file', default='tmp.csv')
-    parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=20)
+    parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=0)
     args = parser.parse_args()
 
     init_distributed()
@@ -78,28 +78,26 @@ if __name__ == '__main__':
     transform = T.ToTensor()
     train_dataset = CIFAR10(root='../data', train=True, download=False, transform=transform)
     train_dataset = CustomDataset(image_to_graph(train_dataset), length=args.l)
-    train_loader = DataLoader(train_dataset, batch_size=20, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=1000, shuffle=True)
 
     data = next(iter(train_loader))
-    stage = manual_split(data, microbatch_size=4, minibatch_size=20, n_classes=10)
+    stage = manual_split(data, n_microbatches=10, minibatch_size=1000, n_classes=10)
 
-    schedule = ScheduleGPipe(stage, n_microbatches=4, loss_fn=criterion)
+    schedule = ScheduleGPipe(stage, n_microbatches=10, loss_fn=criterion)
     indices = torch.arange(data.x.size(0), dtype=torch.float32).view(-1, 1)  # Reshape to a column vector
 
     if stage_index == 0:
-        initial_params = {name: param.clone() for name, param in stage.submod.named_parameters()}
         optimizer = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
         indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
         optimizer.zero_grad()
         data_x_with_index = torch.cat((data.x, indices), dim=1)  
         schedule.step(data_x_with_index)
         optimizer.step()
-
     else:
-        initial_params = {name: param.clone() for name, param in stage.submod.named_parameters()}
         optimizer = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
         optimizer.zero_grad()
         out = schedule.step(target=data.y)
         optimizer.step()
 
+    print("DONE")
     dist.destroy_process_group()

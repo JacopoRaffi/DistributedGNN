@@ -31,16 +31,16 @@ def init_distributed():
    num_stages = world_size
 
 #TODO: need 2 schedules per stage, 1 for training (with loss parameters) and 1 for validation (without loss parameters)
-def train(schedule, stage, optimizer, train_loader, val_loader, epoch, device, filename):
+def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, filename):
     '''
     Train the model and compute the performance metrics
 
     Parameters:
     ----------
-    schedule: PipelineScheduleSingle
-        Schedule for the pipeline
     stage: PipelineStage
         Stage of the pipeline
+    criterion: torch.nn._WeightedLoss
+        Loss function to use
     optimizer: torch.optim.Optimizer
         Optimizer to use
     train_loader: torch_geometric.loader.DataLoader
@@ -58,6 +58,9 @@ def train(schedule, stage, optimizer, train_loader, val_loader, epoch, device, f
     -------
     return: None
     '''
+
+    train_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch, loss_fn=criterion)
+    val_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch)
 
     # Log the training and validation (test) time
     with open(filename, 'w+') as log_file: 
@@ -81,9 +84,9 @@ def train(schedule, stage, optimizer, train_loader, val_loader, epoch, device, f
                 if stage_index == 0:
                     indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
                     data_x_with_index = torch.cat((data.x, indices), dim=1)  
-                    schedule.step(data_x_with_index)
+                    train_schedule.step(data_x_with_index)
                 else:
-                    output = schedule.step(target=data.y)
+                    output = train_schedule.step(target=data.y)
                 
                 optimizer.step()
                 
@@ -106,9 +109,11 @@ def train(schedule, stage, optimizer, train_loader, val_loader, epoch, device, f
                     if stage_index == 0:
                         indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
                         data_x_with_index = torch.cat((data.x, indices), dim=1)  
-                        schedule.step(data_x_with_index)
+                        val_schedule.step(data_x_with_index)
                     else:
-                        output = schedule.step()
+                        output = val_schedule.step()
+                        loss = criterion(output, data.y)
+
                     
                     end_batch_time = time.time()
 
@@ -174,11 +179,10 @@ if __name__ == '__main__':
     data = next(iter(train_loader))
     stage = manual_split(data, n_microbatches=n_microbatch, batch_size=batch_size, n_classes=10)
 
-    criterion = torch.nn.CrossEntropyLoss()
-    schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch, loss_fn=criterion)
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
+    criterion = torch.nn.CrossEntropyLoss()
 
-    train(schedule, stage, optim, train_loader, train_loader, 2, device, args.filename)
+    train(stage, optim, train_loader, train_loader, 2, device, args.filename)
 
     '''if stage_index == 0:
         optimizer = torch.optim.Adam(stage.submod.parameters(), lr=0.001)

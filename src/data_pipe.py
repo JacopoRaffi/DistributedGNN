@@ -15,8 +15,6 @@ from model import *
 from data import CustomDataset, image_to_graph
 
 #TODO: refactor code to make more elegant
-#   change microbatch_size in n_microbatch
-#   same for minibatch_size
 
 global rank, device, pp_group, stage_index, num_stages
 def init_distributed():
@@ -65,11 +63,14 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
     return: None
     '''
 
-    if stage_index % 2:
+    print(f'RANK_{rank}_START_TRAINING: {stage_index}')
+
+    if rank % 2:
         DDP(stage.submod) # DataParallel for the first stage
     else:
         DDP(stage.submod) # DataParallel for the second stage
 
+    print(f'RANK_{rank}_START_TRAINING: {stage_index}')
 
     train_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch, loss_fn=criterion)
     val_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch)
@@ -166,7 +167,8 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
             group=pp_group
         )
     
-    
+    print(f'RANK_{rank}_STAGE_TRAINING: {stage_index}')
+
     return stage
 
 if __name__ == '__main__':
@@ -179,7 +181,7 @@ if __name__ == '__main__':
     device = 'cpu'
     batch_size = 20
     n_microbatch = 2
-    filename = f'../log/pipe_{stage_index}_micro{n_microbatch}.csv'
+    filename = f'../log/datapipe_{stage_index}_micro{n_microbatch}.csv'
 
     transform = T.ToTensor()
     train_dataset = CIFAR10(root='../data', train=True, download=False, transform=transform)
@@ -200,7 +202,8 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
-    #train(stage, criterion, optim, train_loader, test_loader, 2, device, filename)
+    print(f'RANK_{rank}_BEFORE_TRAINING: {stage_index}')
+    train(stage, criterion, optim, train_loader, test_loader, 1, device, filename)
 
-    print(f'RANK_{stage_index}_DONE')
-    dist.destroy_process_group()
+    print(f'RANK_{rank}_DONE')
+    dist.destroy_process_group(group=pp_group)

@@ -14,8 +14,6 @@ from model import *
 from data import CustomDataset, image_to_graph
 
 #TODO: refactor code to make more elegant
-#   change microbatch_size in n_microbatch
-#   same for minibatch_size
 
 global rank, device, pp_group, stage_index, num_stages
 def init_distributed():
@@ -25,7 +23,6 @@ def init_distributed():
    device = torch.device('cpu')
    dist.init_process_group()
 
-   # This group can be a sub-group in the N-D parallel case
    pp_group = dist.new_group()
    stage_index = rank
    num_stages = world_size

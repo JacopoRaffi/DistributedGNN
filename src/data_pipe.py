@@ -71,7 +71,7 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
     return: None
     '''
 
-    DDP(stage.submod, process_group=ddp_group) #TODO: fix me
+    stage.submod = DDP(stage.submod, process_group=ddp_group) #TODO: fix me
 
     train_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch, loss_fn=criterion)
     val_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch)
@@ -143,7 +143,7 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
     data_x_with_index = torch.cat((data.x, indices), dim=1)  
     features_chunk = torch.chunk(data_x_with_index, n_microbatches, dim=0)[0]
 
-    if (stage_index % 2) == 0: # First stage
+    if (rank % 2) == 0: # First stage
         for i in range(4, 8):
             del model.blocks[str(i)]
             model.fc1 = None
@@ -160,7 +160,7 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
 
     stage = PipelineStage(
             submodule=model,
-            stage_index=stage_index,
+            stage_index=(rank % 2),
             num_stages=num_stages,
             device=device,
             input_args=input_args,
@@ -168,9 +168,11 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
             group=pipe_group
         )
 
-    print(f'RANK_{rank}_STAGE: {stage.stage_index}')
-
     return stage
+
+def get_num_parameters(model):
+    total_params = sum(p.numel() for p in model.parameters())
+    return total_params
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -203,7 +205,7 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
-    train(stage, criterion, optim, train_loader, test_loader, 1, device, filename)
+    #train(stage, criterion, optim, train_loader, test_loader, 1, device, filename)
 
     print(f'RANK_{rank}_DONE')
     dist.destroy_process_group(group=pipe_group)

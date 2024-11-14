@@ -166,7 +166,6 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
             group=pp_group
         )
     
-    print(f'Process: {rank} - Stage: {stage.stage_index}')
     
     return stage
 
@@ -176,7 +175,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     init_distributed()
-    print("ciao")
 
     device = 'cpu'
     batch_size = 20

@@ -16,24 +16,32 @@ from data import CustomDataset, image_to_graph
 
 #TODO: refactor code to make more elegant
 
-global rank, device, pp_group, stage_index, num_stages
+global rank, device, pipe_group, ddp_group, stage_index, num_stages
 def init_distributed():
-    global rank, device, pp_group, stage_index, num_stages
+    global rank, device, pipe_group, ddp_group, stage_index, num_stages
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
     device = torch.device('cpu')
     dist.init_process_group()
 
-    group_1 = [0, 1]
-    group_2 = [2, 3]
+    pipe_group_1 = [0, 1] # first copy of the model
+    pipe_group_2 = [2, 3] # second copy of the model
 
-    if rank in group_1:
-        pp_group = dist.new_group(ranks=group_1)
+    ddp_group_1 = [0, 2] # first stage
+    ddp_group_2 = [1, 3] # second stage
+
+    if rank in pipe_group_1:
+        pipe_group = dist.new_group(ranks=pipe_group_1)
     else:
-        pp_group = dist.new_group(ranks=group_2)
+        pipe_group = dist.new_group(ranks=pipe_group_2)
 
-    stage_index = pp_group.rank()
-    num_stages = world_size
+    if rank in ddp_group_1:
+        ddp_group = dist.new_group(ranks=ddp_group_1)
+    else:
+        ddp_group = dist.new_group(ranks=ddp_group_2)
+
+    stage_index = pipe_group.rank()
+    num_stages = pipe_group.size()
 
 def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, filename):
     '''
@@ -63,14 +71,7 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
     return: None
     '''
 
-    print(f'RANK_{rank}_START_TRAINING: {stage_index}')
-
-    if rank % 2:
-        DDP(stage.submod) # DataParallel for the first stage
-    else:
-        DDP(stage.submod) # DataParallel for the second stage
-
-    print(f'RANK_{rank}_START_TRAINING: {stage_index}')
+    DDP(stage.submod, process_group=ddp_group) #TODO: fix me
 
     train_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch, loss_fn=criterion)
     val_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch)
@@ -164,10 +165,10 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
             device=device,
             input_args=input_args,
             output_args=output_args,
-            group=pp_group
+            group=pipe_group
         )
-    
-    print(f'RANK_{rank}_STAGE_TRAINING: {stage_index}')
+
+    print(f'RANK_{rank}_STAGE: {stage.stage_index}')
 
     return stage
 
@@ -202,8 +203,7 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
-    print(f'RANK_{rank}_BEFORE_TRAINING: {stage_index}')
     train(stage, criterion, optim, train_loader, test_loader, 1, device, filename)
 
     print(f'RANK_{rank}_DONE')
-    dist.destroy_process_group(group=pp_group)
+    dist.destroy_process_group(group=pipe_group)

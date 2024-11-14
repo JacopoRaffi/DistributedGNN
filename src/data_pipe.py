@@ -20,18 +20,23 @@ from data import CustomDataset, image_to_graph
 
 global rank, device, pp_group, stage_index, num_stages
 def init_distributed():
-   global rank, device, pp_group, stage_index, num_stages
-   rank = int(os.environ["RANK"])
-   world_size = int(os.environ["WORLD_SIZE"])
-   device = torch.device('cpu')
-   dist.init_process_group()
+    global rank, device, pp_group, stage_index, num_stages
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+    device = torch.device('cpu')
+    dist.init_process_group()
 
-   # This group can be a sub-group in the N-D parallel case
-   pp_group = dist.new_group()
-   stage_index = rank
-   num_stages = world_size
+    group_1 = [0, 1]
+    group_2 = [2, 3]
 
-#TODO: need 2 schedules per stage, 1 for training (with loss parameters) and 1 for validation (without loss parameters)
+    if rank in group_1:
+        pp_group = dist.new_group(ranks=group_1)
+    else:
+        pp_group = dist.new_group(ranks=group_2)
+
+    stage_index = pp_group.rank()
+    num_stages = world_size
+
 def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, filename):
     '''
     Train the model and compute the performance metrics
@@ -136,7 +141,7 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
     data_x_with_index = torch.cat((data.x, indices), dim=1)  
     features_chunk = torch.chunk(data_x_with_index, n_microbatches, dim=0)[0]
 
-    if stage_index == 0:
+    if (stage_index % 2) == 0: # First stage
         for i in range(4, 8):
             del model.blocks[str(i)]
             model.fc1 = None
@@ -144,7 +149,7 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
             input_args = (features_chunk,)
             output_args = (features_chunk, )
 
-    else:
+    else: # Second stage
         out_chunk = torch.rand(batch_size//n_microbatches, n_classes, dtype=torch.float32)
         for i in range(0, 4):
             del model.blocks[str(i)]
@@ -158,29 +163,37 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
             device=device,
             input_args=input_args,
             output_args=output_args,
+            group=pp_group
         )
+    
+    print(f'Process: {rank} - Stage: {stage.stage_index}')
     
     return stage
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=0)
+    parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=100)
     args = parser.parse_args()
 
     init_distributed()
+    print("ciao")
 
     device = 'cpu'
-    batch_size = 1000
-    n_microbatch = 5
+    batch_size = 20
+    n_microbatch = 2
     filename = f'../log/pipe_{stage_index}_micro{n_microbatch}.csv'
 
     transform = T.ToTensor()
     train_dataset = CIFAR10(root='../data', train=True, download=False, transform=transform)
-    train_dataset = CustomDataset(image_to_graph(train_dataset), length=args.l)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-
     test_dataset = CIFAR10(root='../data', train=False, download=False, transform=transform)
-    test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l)
+    if rank < 2:
+        train_dataset = CustomDataset(image_to_graph(train_dataset), length=args.l, distributed=1)
+        test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l, distributed=1)
+    else:
+        train_dataset = CustomDataset(image_to_graph(train_dataset), length=args.l, distributed=2)
+        test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l, distributed=2)
+    
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     data = next(iter(train_loader))
@@ -189,7 +202,7 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
-    train(stage, criterion, optim, train_loader, test_loader, 2, device, filename)
+    #train(stage, criterion, optim, train_loader, test_loader, 2, device, filename)
 
     print(f'RANK_{stage_index}_DONE')
     dist.destroy_process_group()

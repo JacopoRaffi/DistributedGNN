@@ -30,7 +30,6 @@ def init_distributed():
    stage_index = rank
    num_stages = world_size
 
-#TODO: need 2 schedules per stage, 1 for training (with loss parameters) and 1 for validation (without loss parameters)
 def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, filename):
     '''
     Train the model and compute the performance metrics

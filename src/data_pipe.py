@@ -3,6 +3,7 @@ import torchvision.transforms as T
 import torch
 import time
 import argparse
+import torch_geometric
 import os
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -17,29 +18,29 @@ from data import CustomDataset, image_to_graph
 #TODO: refactor code to make more elegant
 
 global rank, device, pipe_group, ddp_group, stage_index, num_stages
+
+
 def init_distributed():
     global rank, device, pipe_group, ddp_group, stage_index, num_stages
     rank = int(os.environ["RANK"])
-    world_size = int(os.environ["WORLD_SIZE"])
+    #world_size = int(os.environ["WORLD_SIZE"])
     device = torch.device('cpu')
     dist.init_process_group()
 
-    pipe_group_1 = [0, 1] # first copy of the model
-    pipe_group_2 = [2, 3] # second copy of the model
-
-    ddp_group_1 = [0, 2] # first stage
-    ddp_group_2 = [1, 3] # second stage
-
-    if rank in pipe_group_1:
-        pipe_group = dist.new_group(ranks=pipe_group_1)
+    if rank < 2:
+        pipe_group_ranks = [0, 1] # first copy of the model
     else:
-        pipe_group = dist.new_group(ranks=pipe_group_2)
+        pipe_group_ranks = [2, 3] # second copy of the model
 
-    if rank in ddp_group_1:
-        ddp_group = dist.new_group(ranks=ddp_group_1)
+    if (rank%2 == 0):
+        ddp_group_ranks = [0, 2] # first stage
     else:
-        ddp_group = dist.new_group(ranks=ddp_group_2)
+        ddp_group_ranks = [1, 3] # second stage
 
+    #TODO: check the docs (all processes even the ones not in the future group should call this func)
+    pipe_group = dist.new_group(ranks=pipe_group_ranks)
+    ddp_group = dist.new_group(ranks=ddp_group_ranks)
+    
     stage_index = pipe_group.rank()
     num_stages = pipe_group.size()
 
@@ -71,7 +72,9 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
     return: None
     '''
 
-    stage.submod = DDP(stage.submod, process_group=ddp_group) #TODO: fix me
+    if (rank%2 == 0):
+        print(f'RANK_{rank}')
+        stage.submod = DDP(stage.submod, process_group=ddp_group) #TODO: fix me
 
     train_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch, loss_fn=criterion)
     val_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch)
@@ -138,6 +141,7 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
             log_file.flush()
 
 def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
+    torch.manual_seed(42)
     model = PipeViGNN(8, 3, 3, 1024, n_classes, data.edge_index, 1024, batch_size//n_microbatches).to(device)
     indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
     data_x_with_index = torch.cat((data.x, indices), dim=1)  
@@ -171,7 +175,10 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
     return stage
 
 def get_num_parameters(model):
-    total_params = sum(p.numel() for p in model.parameters())
+    params = [p.numel() for p in model.parameters()]
+    total_params = sum(params)
+    print(f'RANK_{rank}_params: {params}')
+
     return total_params
 
 if __name__ == '__main__':
@@ -189,6 +196,7 @@ if __name__ == '__main__':
     transform = T.ToTensor()
     train_dataset = CIFAR10(root='../data', train=True, download=False, transform=transform)
     test_dataset = CIFAR10(root='../data', train=False, download=False, transform=transform)
+
     if rank < 2:
         train_dataset = CustomDataset(image_to_graph(train_dataset), length=args.l, distributed=1)
         test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l, distributed=1)
@@ -205,7 +213,9 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
+    print(f'RANK_{rank}_parameters: {get_num_parameters(stage.submod)}')
+
     #train(stage, criterion, optim, train_loader, test_loader, 1, device, filename)
 
     print(f'RANK_{rank}_DONE')
-    dist.destroy_process_group(group=pipe_group)
+    dist.destroy_process_group(group=dist.group.WORLD)

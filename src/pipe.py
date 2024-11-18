@@ -81,8 +81,10 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
                     indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
                     data_x_with_index = torch.cat((data.x, indices), dim=1)  
                     train_schedule.step(data_x_with_index)
-                else:
+                elif stage_index == num_stages-1:
                     output = train_schedule.step(target=data.y)
+                else:
+                    train_schedule.step()
                 
                 optimizer.step()
                 
@@ -106,9 +108,11 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
                         indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
                         data_x_with_index = torch.cat((data.x, indices), dim=1)  
                         val_schedule.step(data_x_with_index)
-                    else:
+                    elif stage_index == num_stages-1:
                         output = val_schedule.step()
                         loss = criterion(output, data.y)
+                    else:
+                        val_schedule.step()
 
                     
                     end_batch_time = time.time()
@@ -151,6 +155,56 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
     
     return stage
 
+def four_split(data, n_microbatches=10, batch_size=20, n_classes=10):
+    model = PipeViGNN(8, 3, 3, 1024, n_classes, data.edge_index, 1024, batch_size//n_microbatches).to(device)
+    indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
+    data_x_with_index = torch.cat((data.x, indices), dim=1)  
+    features_chunk = torch.chunk(data_x_with_index, n_microbatches, dim=0)[0]
+
+    match (stage_index % 4):
+        case 0:
+            for i in range(6, 8):
+                del model.blocks[str(i)]
+            model.fc1 = None
+            model.fc2 = None
+            input_args = (features_chunk,)
+            output_args = (features_chunk,)
+        case 1:
+            for i in range(0, 2):
+                del model.blocks[str(i)]
+            for i in range(4, 8):
+                del model.blocks[str(i)]
+            model.fc1 = None
+            model.fc2 = None
+            input_args = (features_chunk,)
+            output_args = (features_chunk,)
+        case 2:
+            for i in range(0, 4):
+                del model.blocks[str(i)]
+            for i in range(6, 8):
+                del model.blocks[str(i)]
+            model.fc1 = None
+            model.fc2 = None
+            input_args = (features_chunk,)
+            output_args = (features_chunk,)
+        case 3:
+            out_chunk = torch.rand(batch_size // n_microbatches, n_classes, dtype=torch.float32)
+            for i in range(0, 6):
+                del model.blocks[str(i)]
+            input_args = (features_chunk,)
+            output_args = (out_chunk,)
+    
+    stage = PipelineStage(
+            submodule=model,
+            stage_index=stage_index,
+            num_stages=num_stages,
+            device=device,
+            input_args=input_args,
+            output_args=output_args,
+        )
+    
+    return stage
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=0)
@@ -160,8 +214,8 @@ if __name__ == '__main__':
 
     device = 'cpu'
     batch_size = 1000
-    n_microbatch = 5
-    filename = f'../log/pipe_{stage_index}_micro{n_microbatch}.csv'
+    n_microbatch = 10
+    filename = f'../log/pipe_{stage_index}_micro{n_microbatch}_stage{num_stages}.csv'
 
     transform = T.ToTensor()
     train_dataset = CIFAR10(root='../data', train=True, download=False, transform=transform)
@@ -173,7 +227,7 @@ if __name__ == '__main__':
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     data = next(iter(train_loader))
-    stage = manual_split(data, n_microbatches=n_microbatch, batch_size=batch_size, n_classes=10)
+    stage = four_split(data, n_microbatches=n_microbatch, batch_size=batch_size, n_classes=10)
 
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()

@@ -15,9 +15,9 @@ from data import CustomDataset, image_to_graph
 
 #TODO: refactor code to make more elegant
 
-global rank, device, pp_group, stage_index, num_stages
+global rank, device, pp_group, stage_index, num_stages, file
 def init_distributed():
-   global rank, device, pp_group, stage_index, num_stages
+   global rank, device, pp_group, stage_index, num_stages, file
    rank = int(os.environ["RANK"])
    world_size = int(os.environ["WORLD_SIZE"])
    device = torch.device('cpu')
@@ -26,6 +26,7 @@ def init_distributed():
    pp_group = dist.new_group()
    stage_index = rank
    num_stages = world_size
+   file = open(f'tmp_{stage_index}.txt', mode='w+')
 
 def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, filename):
     '''
@@ -232,6 +233,8 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
+    file.write('start training')
+    file.flush()
     train(stage, criterion, optim, train_loader, test_loader, 2, device, filename)
 
     print(f'RANK_{stage_index}_DONE')

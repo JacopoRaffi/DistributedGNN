@@ -27,19 +27,31 @@ def init_distributed():
     device = torch.device('cpu')
     dist.init_process_group()
 
-    if rank < 2:
-        pipe_group_ranks = [0, 1] # first copy of the model
-    else:
-        pipe_group_ranks = [2, 3] # second copy of the model
+    # Define pipeline groups
+    pipe_group_a_ranks = [0, 1]  # First copy of the model
+    pipe_group_b_ranks = [2, 3]  # Second copy of the model
 
-    if (rank%2 == 0):
-        ddp_group_ranks = [0, 2] # first stage
-    else:
-        ddp_group_ranks = [1, 3] # second stage
+    # Define DDP groups
+    ddp_group_c_ranks = [0, 2]  # First stage
+    ddp_group_d_ranks = [1, 3]  # Second stage
 
-    #TODO: check the docs (all processes even the ones not in the future group should call this func)
-    pipe_group = dist.new_group(ranks=pipe_group_ranks)
-    ddp_group = dist.new_group(ranks=ddp_group_ranks)
+    # All processes must create all groups
+    pipe_group_a = dist.new_group(ranks=pipe_group_a_ranks)
+    pipe_group_b = dist.new_group(ranks=pipe_group_b_ranks)
+    ddp_group_c = dist.new_group(ranks=ddp_group_c_ranks)
+    ddp_group_d = dist.new_group(ranks=ddp_group_d_ranks)
+
+    # Determine pipeline group
+    if rank in pipe_group_a_ranks:
+        pipe_group = pipe_group_a
+    elif rank in pipe_group_b_ranks:
+        pipe_group = pipe_group_b
+
+    # Determine DDP group
+    if rank in ddp_group_c_ranks:
+        ddp_group = ddp_group_c
+    elif rank in ddp_group_d_ranks:
+        ddp_group = ddp_group_d
     
     stage_index = pipe_group.rank()
     num_stages = pipe_group.size()
@@ -72,10 +84,9 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
     return: None
     '''
 
-    if (rank%2 == 0):
-        print(f'RANK_{rank}')
-        stage.submod = DDP(stage.submod, process_group=ddp_group) #TODO: fix me
-
+    
+    stage.submod = DDP(stage.submod, process_group=ddp_group) #TODO: fix me
+     
     train_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch, loss_fn=criterion)
     val_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch)
 
@@ -213,9 +224,7 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
-    print(f'RANK_{rank}_parameters: {get_num_parameters(stage.submod)}')
-
-    #train(stage, criterion, optim, train_loader, test_loader, 1, device, filename)
+    train(stage, criterion, optim, train_loader, test_loader, 1, device, filename)
 
     print(f'RANK_{rank}_DONE')
     dist.destroy_process_group(group=dist.group.WORLD)

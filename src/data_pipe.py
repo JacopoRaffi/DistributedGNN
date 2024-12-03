@@ -91,6 +91,7 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
     val_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch)
 
     # Log the training and validation (test) time
+    print(f'RANK_{rank}_START_TRAINING')
     with open(filename, 'w+') as log_file: 
         csv_writer = csv.writer(log_file)
         header = ['epoch', 'batch', 'batch_time(s)', 'phase'] # Phase: 0 - train, 1 - val
@@ -202,7 +203,7 @@ if __name__ == '__main__':
     device = 'cpu'
     batch_size = 20
     n_microbatch = 2
-    filename = f'../log/datapipe_{stage_index}_micro{n_microbatch}.csv'
+    filename = f'../log/datapipe_{rank}_micro{n_microbatch}.csv'
 
     transform = T.ToTensor()
     train_dataset = CIFAR10(root='../data', train=True, download=False, transform=transform)

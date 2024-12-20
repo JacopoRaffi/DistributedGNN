@@ -138,6 +138,7 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
                     if stage_index == 0:
                         indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
                         data_x_with_index = torch.cat((data.x, indices), dim=1)  
+                        print(f'RANK_{rank}_VAL_STEP')
                         val_schedule.step(data_x_with_index)
                     else:
                         output = val_schedule.step()

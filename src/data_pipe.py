@@ -85,7 +85,7 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
     '''
 
     
-    stage.submod = DDP(stage.submod, process_group=ddp_group) #TODO: fix me
+    stage.submod = DDP(stage.submod, process_group=ddp_group)
      
     train_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch, loss_fn=criterion)
     val_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch)
@@ -138,7 +138,6 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
                     if stage_index == 0:
                         indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
                         data_x_with_index = torch.cat((data.x, indices), dim=1)  
-                        print(f'RANK_{rank}_VAL_STEP')
                         val_schedule.step(data_x_with_index)
                     else:
                         output = val_schedule.step()
@@ -196,14 +195,14 @@ def get_num_parameters(model):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=100)
+    parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=0)
     args = parser.parse_args()
 
     init_distributed()
 
     device = 'cpu'
-    batch_size = 20
-    n_microbatch = 2
+    batch_size = 1000
+    n_microbatch = 5
     filename = f'../log/datapipe_{rank}_micro{n_microbatch}.csv'
 
     transform = T.ToTensor()
@@ -226,7 +225,7 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
-    train(stage, criterion, optim, train_loader, test_loader, 1, device, filename)
+    train(stage, criterion, optim, train_loader, test_loader, 4, device, filename)
 
     print(f'RANK_{rank}_DONE')
     dist.destroy_process_group(group=dist.group.WORLD)

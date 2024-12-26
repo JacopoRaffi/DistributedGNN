@@ -23,6 +23,7 @@ global rank, device, pipe_group, ddp_group, stage_index, num_stages
 def init_distributed():
     global rank, device, pipe_group, ddp_group, stage_index, num_stages
     rank = int(os.environ["RANK"])
+    os.environ["GLOO_SOCKET_IFNAME"] = "ib0"
     #world_size = int(os.environ["WORLD_SIZE"])
     device = torch.device('cpu')
     dist.init_process_group()
@@ -199,10 +200,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     init_distributed()
+    print(torch.get_num_threads())
 
     device = 'cpu'
     batch_size = 1000
-    n_microbatch = 5
+    n_microbatch = 10
     filename = f'../log/datapipe_{rank}_micro{n_microbatch}.csv'
 
     transform = T.ToTensor()

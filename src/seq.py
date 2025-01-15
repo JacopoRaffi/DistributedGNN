@@ -42,7 +42,7 @@ def train(model, optimizer, criterion, train_loader, val_loader, epoch, device, 
     # Log the training and validation (test) time
     with open(filename, 'w+') as log_file: 
         csv_writer = csv.writer(log_file)
-        header = ['epoch', 'batch', 'batch_time(s)', 'phase'] # Phase: 0 - train, 1 - val
+        header = ['epoch', 'batch', 'batch_time(s)', 'loss', 'phase'] # Phase: 0 - train, 1 - val
         csv_writer.writerow(header)
         log_file.flush()
 
@@ -67,6 +67,7 @@ def train(model, optimizer, criterion, train_loader, val_loader, epoch, device, 
                 end_batch_time = time.time()
                 
                 csv_row.append(end_batch_time - start_batch_time)
+                csv_row.append(loss.item())
                 csv_row.append(0)
                 csv_writer.writerow(csv_row) # The row contains the epoch_id, the batch_id, the time spent in the batch and the phase
                 print(f'Epoch: {epoch}, Batch: {i}, Loss: {loss.item()}')
@@ -89,6 +90,7 @@ def train(model, optimizer, criterion, train_loader, val_loader, epoch, device, 
                     end_batch_time = time.time()
 
                     csv_row.append(end_batch_time - start_batch_time)
+                    csv_row.append(loss.item())
                     csv_row.append(1)
                     csv_writer.writerow(csv_row)
 
@@ -97,7 +99,7 @@ def train(model, optimizer, criterion, train_loader, val_loader, epoch, device, 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--filename', type=str, help='Name of the log file', default='tmp.csv')
+    parser.add_argument('--filename', type=str, help='Name of the log file', default='loss.csv')
     parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=0)
     args = parser.parse_args()
 
@@ -119,4 +121,4 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=1000, shuffle=True)
     val_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
 
-    train(gnn, optimizer, criterion, train_loader, val_loader, 5, device, args.filename)
+    train(gnn, optimizer, criterion, train_loader, val_loader, 2, device, args.filename)

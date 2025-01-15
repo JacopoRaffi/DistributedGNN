@@ -49,8 +49,6 @@ class CustomDataset(torch_geometric.data.Dataset):
                 self.dataset = self.dataset[midpoint:]
 
     def __len__(self):
-        if self.dist:
-            return len(self.dataset) 
         return len(self.dataset)
 
     def __getitem__(self, idx):

@@ -108,7 +108,6 @@ if __name__ == '__main__':
     device = 'cpu'
 
     gnn = ViGNN(8, 3, 3, 1024, 10).to(device)
-    initialize_weights(gnn)
 
     optimizer = torch.optim.Adam(gnn.parameters(), lr=1e-4)
     criterion = torch.nn.CrossEntropyLoss()

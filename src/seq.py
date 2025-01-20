@@ -9,6 +9,7 @@ from torch_geometric.loader import DataLoader
 from model import *
 from data import CustomDataset, image_to_graph
 
+torch.manual_seed(42)
 
 def train(model, optimizer, criterion, train_loader, val_loader, epoch, device, filename):
     '''
@@ -61,6 +62,7 @@ def train(model, optimizer, criterion, train_loader, val_loader, epoch, device, 
                 output = model(data.x, data.edge_index, data.batch)
                 loss = criterion(output, data.y)
                 loss.backward()
+
                 optimizer.step()
                 total_loss += loss.item()
                 
@@ -106,8 +108,9 @@ if __name__ == '__main__':
     device = 'cpu'
 
     gnn = ViGNN(8, 3, 3, 1024, 10).to(device)
+    initialize_weights(gnn)
 
-    optimizer = torch.optim.Adam(gnn.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(gnn.parameters(), lr=1e-4)
     criterion = torch.nn.CrossEntropyLoss()
 
     transform = T.ToTensor()

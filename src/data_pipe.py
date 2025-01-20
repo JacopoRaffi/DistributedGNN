@@ -2,6 +2,8 @@ from torchvision.datasets import CIFAR10
 import torchvision.transforms as T
 import torch
 import time
+import random
+from collections import Counter
 import argparse
 import torch_geometric
 import os
@@ -19,6 +21,7 @@ from data import CustomDataset, image_to_graph
 
 global rank, device, pipe_group, ddp_group, stage_index, num_stages
 
+torch.manual_seed(42)
 
 def init_distributed():
     global rank, device, pipe_group, ddp_group, stage_index, num_stages
@@ -95,7 +98,7 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
     print(f'RANK_{rank}_START_TRAINING')
     with open(filename, 'w+') as log_file: 
         csv_writer = csv.writer(log_file)
-        header = ['epoch', 'batch', 'batch_time(s)', 'phase'] # Phase: 0 - train, 1 - val
+        header = ['epoch', 'batch', 'batch_time(s)', 'loss', 'phase'] # Phase: 0 - train, 1 - val
         csv_writer.writerow(header)
         log_file.flush()
 
@@ -117,12 +120,17 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
                     train_schedule.step(data_x_with_index)
                 else:
                     output = train_schedule.step(target=data.y)
+                    loss = criterion(output, data.y)
                 
                 optimizer.step()
                 
                 end_batch_time = time.time()
                 
                 csv_row.append(end_batch_time - start_batch_time)
+                if stage_index == 0:
+                    csv_row.append(-1)
+                else:
+                    csv_row.append(loss.item())
                 csv_row.append(0)
                 csv_writer.writerow(csv_row) # The row contains the epoch_id, the batch_id, the time spent in the batch and the phase (0 - train, 1 - val)
 
@@ -148,14 +156,18 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
                     end_batch_time = time.time()
 
                     csv_row.append(end_batch_time - start_batch_time)
+                    if stage_index == 0:
+                        csv_row.append(-1)
+                    else:
+                        csv_row.append(loss.item())
                     csv_row.append(1)
                     csv_writer.writerow(csv_row)
 
             log_file.flush()
 
 def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
-    torch.manual_seed(42)
     model = PipeViGNN(8, 3, 3, 1024, n_classes, data.edge_index, 1024, batch_size//n_microbatches).to(device)
+
     indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
     data_x_with_index = torch.cat((data.x, indices), dim=1)  
     features_chunk = torch.chunk(data_x_with_index, n_microbatches, dim=0)[0]
@@ -200,22 +212,32 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     init_distributed()
-    print(torch.get_num_threads())
 
     device = 'cpu'
     batch_size = 1000
-    n_microbatch = 10
-    filename = f'../log/datapipe_{rank}_micro{n_microbatch}.csv'
+    n_microbatch = 5
+    filename = f'../log/datapipe_{rank}_micro{n_microbatch}_loss.csv'
 
     transform = T.ToTensor()
     train_dataset = CIFAR10(root='../data', train=True, download=False, transform=transform)
     test_dataset = CIFAR10(root='../data', train=False, download=False, transform=transform)
 
+    # Shuffle the *indices* before creating the CustomDataset
+    train_indices = list(range(len(train_dataset)))
+    random.shuffle(train_indices)
+
+    test_indices = list(range(len(test_dataset)))
+    random.shuffle(test_indices)
+
+
+    def subset_dataset(dataset, indices):
+        return torch.utils.data.Subset(dataset, indices)
+
     if rank < 2:
-        train_dataset = CustomDataset(image_to_graph(train_dataset), length=args.l, distributed=1)
+        train_dataset = CustomDataset(image_to_graph(subset_dataset(train_dataset, train_indices)), length=args.l, distributed=1)
         test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l, distributed=1)
     else:
-        train_dataset = CustomDataset(image_to_graph(train_dataset), length=args.l, distributed=2)
+        train_dataset = CustomDataset(image_to_graph(subset_dataset(train_dataset, train_indices)), length=args.l, distributed=2)
         test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l, distributed=2)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -224,10 +246,10 @@ if __name__ == '__main__':
     data = next(iter(train_loader))
     stage = manual_split(data, n_microbatches=n_microbatch, batch_size=batch_size, n_classes=10)
 
-    optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
+    optim = torch.optim.Adam(stage.submod.parameters(), lr=1e-4)
     criterion = torch.nn.CrossEntropyLoss()
 
-    train(stage, criterion, optim, train_loader, test_loader, 4, device, filename)
+    train(stage, criterion, optim, train_loader, test_loader, 2, device, filename)
 
     print(f'RANK_{rank}_DONE')
     dist.destroy_process_group(group=dist.group.WORLD)

@@ -107,6 +107,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     device = 'cpu'
+    batch_size = 1000
+    epoch = 10
 
     gnn = ViGNN(8, 3, 3, 1024, 10).to(device)
 
@@ -121,7 +123,7 @@ if __name__ == '__main__':
     train_dataset = CustomDataset(image_to_graph(train_dataset), length=args.l)
     test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l)
 
-    train_loader = DataLoader(train_dataset, batch_size=1000, shuffle=True)
-    val_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-    train(gnn, optimizer, criterion, train_loader, val_loader, 2, device, args.filename)
+    train(gnn, optimizer, criterion, train_loader, val_loader, epoch, device, args.filename)

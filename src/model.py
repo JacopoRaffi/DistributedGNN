@@ -12,12 +12,23 @@ class FFN(nn.Module):
     FFN Module with 2 linear layers and batch normalization
 
     Attributes:
+    -----------
     fc1: nn.Sequential
         First linear layer with batch normalization
     fc2: nn.Sequential
         Second linear layer with batch normalization
     '''
     def __init__(self, in_size, hidden_size=512):
+        '''
+        Initializes the FFN module
+        
+        Parameters:
+        ----------
+        in_size: int
+            Number of input channels
+        hidden_size: int
+            Size of the hidden layer
+        '''
         super(FFN, self).__init__()
 
         self.fc1 = nn.Sequential(
@@ -30,7 +41,7 @@ class FFN(nn.Module):
             nn.BatchNorm1d(in_size),
         )
 
-    def forward(self, x):
+    def forward(self, x:torch.Tensor):
         shortcut = x
         x = self.fc1(x)
         x = F.gelu(x)
@@ -51,7 +62,17 @@ class Grapher(nn.Module):
     fc2: nn.Sequential
         Second linear layer with batch normalization
     """
-    def __init__(self, in_size, hidden_size=256):
+    def __init__(self, in_size:int, hidden_size:int=256):
+        '''
+        Initializes the Grapher module
+
+        Parameters:
+        ----------
+        in_size: int
+            Number of input channels
+        hidden_size: int
+            Size of the hidden layer
+        '''
         super(Grapher, self).__init__()
 
         self.fc1 = nn.Sequential(
@@ -65,7 +86,7 @@ class Grapher(nn.Module):
             nn.BatchNorm1d(in_size),
         )
 
-    def forward(self, x, edge_index):
+    def forward(self, x:torch.Tensor, edge_index:torch.Tensor):
         _tmp = x
         x = self.fc1(x)
         x = F.gelu(self.graph_conv(x, edge_index))
@@ -79,12 +100,13 @@ class ViGBlock(nn.Module):
     ViGBlock module with Grapher and FFN
 
     Attributes:
+    -----------
     grapher: Grapher
         Grapher module
     ffn: FFN
         FFN module
     '''
-    def __init__(self, in_channels, ffn_embedding_size=512, grapher_embedding_size=256):
+    def __init__(self, in_channels:int, ffn_embedding_size:int=512, grapher_embedding_size:int=256):
         '''
         Initializes the ViGBlock module
         
@@ -101,7 +123,7 @@ class ViGBlock(nn.Module):
         self.grapher = Grapher(in_channels, grapher_embedding_size)
         self.ffn = FFN(in_channels, ffn_embedding_size)
         
-    def forward(self, x, edge_index):
+    def forward(self, x:torch.Tensor, edge_index:torch.Tensor):
         x = self.grapher(x, edge_index)
         x = self.ffn(x)
         
@@ -112,6 +134,7 @@ class ViGNN(nn.Module):
     ViGNN module with multiple ViGBlock and linear layers
 
     Attributes:
+    -----------
     blocks: torch.nn.ModuleDict
         Dictionary of ViGBlock modules
     '''
@@ -120,6 +143,7 @@ class ViGNN(nn.Module):
         Initializes the ViGNN module
 
         Parameters:
+        ----------
         n_blocks: int
             Number of ViGBlock modules
         channels: int
@@ -140,7 +164,7 @@ class ViGNN(nn.Module):
         self.fc1 = nn.Linear(embedding_size[0], hidden_readout_size)
         self.fc2 = nn.Linear(hidden_readout_size, n_classes)
         
-    def forward(self, x, edge_index, batch=None):
+    def forward(self, x:torch.Tensor, edge_index:torch.Tensor, batch:torch.Tensor=None):
         for vig in self.blocks.values():
             x = vig.forward(x, edge_index)
 
@@ -151,11 +175,12 @@ class ViGNN(nn.Module):
         return x
     
 class PipeViGNN(ViGNN):
-    def __init__(self, *args, edges, graph_nodes, microbatch_size, **kwargs):
+    def __init__(self, *args, edges:torch.Tensor, graph_nodes:int, microbatch_size:int, **kwargs):
         '''
         Manual Pipeline implementation of the ViGNN model
 
         Parameters:
+        ----------
         edges: torch.tensor
             Tensor of edges
         graph_nodes: int
@@ -170,7 +195,7 @@ class PipeViGNN(ViGNN):
         self.microbatch_size = microbatch_size
         self.batch = torch.tensor([i for i in range(microbatch_size) for _ in range(graph_nodes)])
         
-    def forward(self, x):
+    def forward(self, x:torch.Tensor):
         features = x[:, :-1]  # Separate features and indices
         indices = x[..., -1]
         

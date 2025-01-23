@@ -45,3 +45,8 @@ Executing the combination wit two copies and each copies splitted in a 2-stage P
 ```
 ## Acknowledgements
 I would like to thank Prof. Patrizio Dazzi and the University of Pisa for this opportunity.
+## References
+
+<a id="1">[1]</a> Han, K., Wang, Y., Guo, J., Tang, Y., & Wu, E. (2022). Vision GNN: An image is worth a graph of nodes. In *Advances in Neural Information Processing Systems* (Vol. 35, pp. 8291-8303) [Curran Associates, Inc.]. https://proceedings.neurips.cc/paper_files/paper/2022/hash/3743e69c8e47eb2e6d3afaea80e439fb-Abstract-Conference.html
+
+<a id="2">[2]</a> Huang, Y., Cheng, Y., Bapna, A., Firat, O., Chen, D., Chen, M., Lee, H., Ngiam, J., Le, Q. V., Wu, Y., & Chen, Z. (2019). GPipe: Efficient training of giant neural networks using pipeline parallelism. In *Advances in Neural Information Processing Systems* (Vol. 32) [Curran Associates, Inc.]. https://arxiv.org/abs/1811.06965

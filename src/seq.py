@@ -12,7 +12,9 @@ from data import CustomDataset, image_to_graph
 RANDOM_STATE = 42
 torch.manual_seed(RANDOM_STATE)
 
-def train(model, optimizer, criterion, train_loader, val_loader, epoch, device, filename):
+def train(model, optimizer:torch.optim, criterion:torch.nn, 
+          train_loader:torch_geometric.loader, val_loader:torch_geometric.loader, 
+          epoch:int, device:str, filename:str):
     '''
     Train the model and compute the performance metrics
 

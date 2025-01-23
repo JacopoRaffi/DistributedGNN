@@ -13,13 +13,11 @@ from torch_geometric.loader import DataLoader
 from model import *
 from data import CustomDataset, image_to_graph
 
-#TODO: refactor code to make more elegant
-
 global rank, device, pp_group, stage_index, num_stages
 def init_distributed():
    global rank, device, pp_group, stage_index, num_stages
-   rank = int(os.environ["RANK"])
-   world_size = int(os.environ["WORLD_SIZE"])
+   rank = int(os.environ['RANK'])
+   world_size = int(os.environ['WORLD_SIZE'])
    device = torch.device('cpu')
    dist.init_process_group()
 
@@ -27,7 +25,9 @@ def init_distributed():
    stage_index = rank
    num_stages = world_size
 
-def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, filename):
+def train(stage:PipelineStage, criterion:torch.nn, optimizer:torch.optim, 
+          train_loader:torch_geometric.loader.DataLoader, val_loader:torch_geometric.loader.DataLoader, 
+          epoch:int, device:str, filename:str):
     '''
     Train the model and compute the performance metrics
 
@@ -77,13 +77,13 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
                 data = data.to(device)
                 optimizer.zero_grad()
 
-                if stage_index == 0:
+                if stage_index == 0: # First stage
                     indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
                     data_x_with_index = torch.cat((data.x, indices), dim=1)  
                     train_schedule.step(data_x_with_index)
-                elif stage_index == num_stages-1:
+                elif stage_index == num_stages-1: # Last stage
                     output = train_schedule.step(target=data.y)
-                else:
+                else: # Intermediate stages
                     train_schedule.step()
                 
                 optimizer.step()
@@ -91,7 +91,7 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
                 end_batch_time = time.time()
                 
                 csv_row.append(end_batch_time - start_batch_time)
-                csv_row.append(0)
+                csv_row.append(0) # Phase 0 - train
                 csv_writer.writerow(csv_row) # The row contains the epoch_id, the batch_id, the time spent in the batch and the phase (0 - train, 1 - val)
 
             stage.submod.eval()
@@ -104,26 +104,40 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
                     start_batch_time = time.time()
                     
                     data = data.to(device)
-                    if stage_index == 0:
+                    if stage_index == 0: # First stage
                         indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
                         data_x_with_index = torch.cat((data.x, indices), dim=1)  
                         val_schedule.step(data_x_with_index)
-                    elif stage_index == num_stages-1:
+                    elif stage_index == num_stages-1: # Last stage
                         output = val_schedule.step()
                         loss = criterion(output, data.y)
-                    else:
-                        val_schedule.step()
+                    else: # Intermediate stages
+                        val_schedule.step() 
 
                     
                     end_batch_time = time.time()
 
                     csv_row.append(end_batch_time - start_batch_time)
-                    csv_row.append(1)
+                    csv_row.append(1) # Phase 1 - val
                     csv_writer.writerow(csv_row)
 
             log_file.flush()
 
-def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
+def two_split(data:torch.Tensor, n_microbatches:int=10, batch_size:int=20, n_classes:int=10):
+    '''
+    Split manually the model into Pipeline stages
+
+    Parameters:
+    ----------
+    data: torch.Tensor
+        Single Input data
+    n_microbatches: int
+        Number of microbatches (for GPipe)
+    batch_size: int
+        Batch size
+    n_classes: int
+        Number of classes
+    '''
     model = PipeViGNN(8, 3, 3, 1024, n_classes, data.edge_index, 1024, batch_size//n_microbatches).to(device)
     indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
     data_x_with_index = torch.cat((data.x, indices), dim=1)  
@@ -155,7 +169,22 @@ def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
     
     return stage
 
-def four_split(data, n_microbatches=10, batch_size=20, n_classes=10):
+def four_split(data:torch.Tensor, n_microbatches:int=10, batch_size:int=20, n_classes:int=10):
+    '''
+    Split manually the model into Pipeline stages
+
+    Parameters:
+    ----------
+    data: torch.Tensor
+        Single Input data
+    n_microbatches: int
+        Number of microbatches (for GPipe)
+    batch_size: int
+        Batch size
+    n_classes: int
+        Number of classes
+    '''
+
     model = PipeViGNN(8, 3, 3, 1024, n_classes, data.edge_index, 1024, batch_size//n_microbatches).to(device)
     indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
     data_x_with_index = torch.cat((data.x, indices), dim=1)  
@@ -205,9 +234,29 @@ def four_split(data, n_microbatches=10, batch_size=20, n_classes=10):
     
     return stage
 
+def manual_split(data:torch.Tensor, n_microbatches:int=10, batch_size:int=20, n_classes:int=10):
+    '''
+    Split manually the model into Pipeline stages
+
+    Parameters:
+    ----------
+    data: torch.Tensor
+        Single Input data
+    n_microbatches: int
+        Number of microbatches (for GPipe)
+    batch_size: int
+        Batch size
+    n_classes: int
+        Number of classes
+    '''
+    if num_stages == 2:
+        return two_split(data, n_microbatches=n_microbatches, batch_size=batch_size, n_classes=n_classes)
+    elif num_stages == 4:
+        return four_split(data, n_microbatches=n_microbatches, batch_size=batch_size, n_classes=n_classes)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=0)
+    parser.add_argument('--filename', type=str, help='Name of the log file', default='loss.csv')
     args = parser.parse_args()
 
     init_distributed()
@@ -215,24 +264,25 @@ if __name__ == '__main__':
     device = 'cpu'
     batch_size = 1000
     n_microbatch = 5
-    filename = f'../log/pipe_{stage_index}_micro{n_microbatch}_stage{num_stages}.csv'
+    epoch = 10
 
     transform = T.ToTensor()
     train_dataset = CIFAR10(root='../data', train=True, download=False, transform=transform)
-    train_dataset = CustomDataset(image_to_graph(train_dataset), length=args.l)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-
     test_dataset = CIFAR10(root='../data', train=False, download=False, transform=transform)
-    test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l)
+    
+    test_dataset = CustomDataset(image_to_graph(test_dataset))
+    train_dataset = CustomDataset(image_to_graph(train_dataset))
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     data = next(iter(train_loader))
-    stage = four_split(data, n_microbatches=n_microbatch, batch_size=batch_size, n_classes=10)
+    stage = manual_split(data, n_microbatches=n_microbatch, batch_size=batch_size, n_classes=10)
 
     optim = torch.optim.Adam(stage.submod.parameters(), lr=0.001)
     criterion = torch.nn.CrossEntropyLoss()
 
-    train(stage, criterion, optim, train_loader, test_loader, 2, device, filename)
+    train(stage, criterion, optim, train_loader, test_loader, epoch, device, args.filename)
 
     print(f'RANK_{stage_index}_DONE')
-    dist.destroy_process_group()
+    dist.destroy_process_group(group=dist.group.WORLD)

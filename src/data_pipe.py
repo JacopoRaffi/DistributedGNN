@@ -3,9 +3,7 @@ import torchvision.transforms as T
 import torch
 import time
 import random
-from collections import Counter
 import argparse
-import torch_geometric
 import os
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -15,13 +13,13 @@ from torch_geometric.loader import DataLoader
 
 
 from model import *
+from pipe import manual_split
 from data import CustomDataset, image_to_graph
-
-#TODO: refactor code to make more elegant
 
 global rank, device, pipe_group, ddp_group, stage_index, num_stages
 
-torch.manual_seed(42)
+RANDOM_STATE = 42
+torch.manual_seed(RANDOM_STATE)
 
 def init_distributed():
     global rank, device, pipe_group, ddp_group, stage_index, num_stages
@@ -60,7 +58,9 @@ def init_distributed():
     stage_index = pipe_group.rank()
     num_stages = pipe_group.size()
 
-def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, filename):
+def train(stage:PipelineStage, criterion:torch.nn, optimizer:torch.optim, 
+          train_loader:torch_geometric.loader.DataLoader, val_loader:torch_geometric.loader.DataLoader, 
+          epoch:int, device:str, filename:str):
     '''
     Train the model and compute the performance metrics
 
@@ -89,7 +89,7 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
     '''
 
     
-    stage.submod = DDP(stage.submod, process_group=ddp_group)
+    stage.submod = DDP(stage.submod, process_group=ddp_group) # Wrap the model with DDP to synchronize the gradients
      
     train_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch, loss_fn=criterion)
     val_schedule = ScheduleGPipe(stage, n_microbatches=n_microbatch)
@@ -165,50 +165,9 @@ def train(stage, criterion, optimizer, train_loader, val_loader, epoch, device, 
 
             log_file.flush()
 
-def manual_split(data, n_microbatches=10, batch_size=20, n_classes=10):
-    model = PipeViGNN(8, 3, 3, 1024, n_classes, data.edge_index, 1024, batch_size//n_microbatches).to(device)
-
-    indices = torch.arange(data.x.size(0) , dtype=torch.float32).view(-1, 1)
-    data_x_with_index = torch.cat((data.x, indices), dim=1)  
-    features_chunk = torch.chunk(data_x_with_index, n_microbatches, dim=0)[0]
-
-    if (rank % 2) == 0: # First stage
-        for i in range(4, 8):
-            del model.blocks[str(i)]
-            model.fc1 = None
-            model.fc2 = None
-            input_args = (features_chunk,)
-            output_args = (features_chunk, )
-
-    else: # Second stage
-        out_chunk = torch.rand(batch_size//n_microbatches, n_classes, dtype=torch.float32)
-        for i in range(0, 4):
-            del model.blocks[str(i)]
-            input_args = (features_chunk, )
-            output_args = (out_chunk, )
-
-    stage = PipelineStage(
-            submodule=model,
-            stage_index=(rank % 2),
-            num_stages=num_stages,
-            device=device,
-            input_args=input_args,
-            output_args=output_args,
-            group=pipe_group
-        )
-
-    return stage
-
-def get_num_parameters(model):
-    params = [p.numel() for p in model.parameters()]
-    total_params = sum(params)
-    print(f'RANK_{rank}_params: {params}')
-
-    return total_params
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-l', type=int, help='Length of the dataset to consider', default=0)
+    parser.add_argument('--filename', type=str, help='Name of the log file', default='loss.csv')
     args = parser.parse_args()
 
     init_distributed()
@@ -216,29 +175,25 @@ if __name__ == '__main__':
     device = 'cpu'
     batch_size = 1000
     n_microbatch = 5
-    filename = f'../log/datapipe_{rank}_micro{n_microbatch}_loss.csv'
+    epoch = 10
 
     transform = T.ToTensor()
     train_dataset = CIFAR10(root='../data', train=True, download=False, transform=transform)
     test_dataset = CIFAR10(root='../data', train=False, download=False, transform=transform)
 
-    # Shuffle the *indices* before creating the CustomDataset
+    # Shuffle the *indices* before creating the CustomDataset so to have "balanced" classes in each copy
     train_indices = list(range(len(train_dataset)))
     random.shuffle(train_indices)
 
     test_indices = list(range(len(test_dataset)))
     random.shuffle(test_indices)
 
-
-    def subset_dataset(dataset, indices):
-        return torch.utils.data.Subset(dataset, indices)
-
-    if rank < 2:
-        train_dataset = CustomDataset(image_to_graph(subset_dataset(train_dataset, train_indices)), length=args.l, distributed=1)
-        test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l, distributed=1)
-    else:
-        train_dataset = CustomDataset(image_to_graph(subset_dataset(train_dataset, train_indices)), length=args.l, distributed=2)
-        test_dataset = CustomDataset(image_to_graph(test_dataset), length=args.l, distributed=2)
+    if rank < 2: # First copy
+        train_dataset = CustomDataset(image_to_graph(torch.utils.data.Subset(train_dataset, train_indices)), distributed=1)
+        test_dataset = CustomDataset(image_to_graph(test_dataset), distributed=1)
+    else: # Second copy
+        train_dataset = CustomDataset(image_to_graph(torch.utils.data.Subset(train_dataset, train_indices)), distributed=2)
+        test_dataset = CustomDataset(image_to_graph(test_dataset), distributed=2)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -249,7 +204,7 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(stage.submod.parameters(), lr=1e-4)
     criterion = torch.nn.CrossEntropyLoss()
 
-    train(stage, criterion, optim, train_loader, test_loader, 2, device, filename)
+    train(stage, criterion, optim, train_loader, test_loader, epoch, device, args.filename)
 
     print(f'RANK_{rank}_DONE')
     dist.destroy_process_group(group=dist.group.WORLD)

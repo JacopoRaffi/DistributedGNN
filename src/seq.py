@@ -76,7 +76,6 @@ def train(model, optimizer:torch.optim, criterion:torch.nn,
                 csv_row.append(0) # Phase 0 - train
                 # The row contains the epoch_id, the batch_id, the time spent in the batch, the loss and the phase
                 csv_writer.writerow(csv_row)
-                print(f'Epoch: {epoch}, Batch: {i}, Loss: {loss.item()}')
 
             model.eval()
             with torch.no_grad():

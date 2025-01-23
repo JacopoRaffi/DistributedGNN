@@ -32,13 +32,19 @@ def image_to_graph(image_dataset, image_size = (32,32)):
 
 
 class CustomDataset(torch_geometric.data.Dataset):
-    def __init__(self, dataset, length=100, distributed: int = 0):
+    def __init__(self, dataset:list, distributed: int = 0):
+        '''
+        Initializes the data handler.
+        Parameters:
+        dataset: list
+            The dataset to be handled.
+        distributed: int
+            If 0, the dataset is not distributed. If 1, the first half of the dataset is used. If 2, the second half of the dataset is used
+            (Applied only in a data parallel distributed setting with 2 copies).
+        '''
         self.dist = distributed
 
-        if length > 0:
-            self.dataset = dataset[:length]
-        else:
-            self.dataset = dataset
+        self.dataset = dataset
 
         midpoint = len(self.dataset) // 2
 
